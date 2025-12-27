@@ -218,7 +218,7 @@ Server will start on `http://localhost:5000` (HTTP) and `https://localhost:5001`
 using System;
 using System.ComponentModel.DataAnnotations;
 
-namespace SIM_Orchestrator.Models
+namespace SIMOrchestrator.Models
 {
     public class SmsMessage
     {
@@ -249,9 +249,9 @@ namespace SIM_Orchestrator.Models
 **Data/AppDbContext.cs**:
 ```csharp
 using Microsoft.EntityFrameworkCore;
-using SIM_Orchestrator.Models;
+using SIMOrchestrator.Models;
 
-namespace SIM_Orchestrator.Data
+namespace SIMOrchestrator.Data
 {
     public class AppDbContext : DbContext
     {
@@ -280,9 +280,9 @@ namespace SIM_Orchestrator.Data
 ```csharp
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using SIM_Orchestrator.Models;
+using SIMOrchestrator.Models;
 
-namespace SIM_Orchestrator.Services
+namespace SIMOrchestrator.Services
 {
     public interface ISmsStorageService
     {
@@ -300,10 +300,10 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
-using SIM_Orchestrator.Data;
-using SIM_Orchestrator.Models;
+using SIMOrchestrator.Data;
+using SIMOrchestrator.Models;
 
-namespace SIM_Orchestrator.Services
+namespace SIMOrchestrator.Services
 {
     public class SmsStorageService : ISmsStorageService
     {
@@ -357,9 +357,9 @@ namespace SIM_Orchestrator.Services
 **Services/ITelegramService.cs**:
 ```csharp
 using System.Threading.Tasks;
-using SIM_Orchestrator.Models;
+using SIMOrchestrator.Models;
 
-namespace SIM_Orchestrator.Services
+namespace SIMOrchestrator.Services
 {
     public interface ITelegramService
     {
@@ -377,9 +377,9 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using SIM_Orchestrator.Models;
+using SIMOrchestrator.Models;
 
-namespace SIM_Orchestrator.Services
+namespace SIMOrchestrator.Services
 {
     public class TelegramService : ITelegramService
     {
@@ -440,7 +440,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace SIM_Orchestrator.Services
+namespace SIMOrchestrator.Services
 {
     public class RetryService : BackgroundService
     {
@@ -505,10 +505,10 @@ namespace SIM_Orchestrator.Services
 **Controllers/SmsController.cs**:
 ```csharp
 using Microsoft.AspNetCore.Mvc;
-using SIM_Orchestrator.Models;
-using SIM_Orchestrator.Services;
+using SIMOrchestrator.Models;
+using SIMOrchestrator.Services;
 
-namespace SIM_Orchestrator.Controllers
+namespace SIMOrchestrator.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
@@ -567,8 +567,8 @@ namespace SIM_Orchestrator.Controllers
 **Program.cs**:
 ```csharp
 using Microsoft.EntityFrameworkCore;
-using SIM_Orchestrator.Data;
-using SIM_Orchestrator.Services;
+using SIMOrchestrator.Data;
+using SIMOrchestrator.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
