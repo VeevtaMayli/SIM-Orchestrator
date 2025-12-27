@@ -7,14 +7,14 @@
 │                    SMS Gateway Ecosystem                         │
 └─────────────────────────────────────────────────────────────────┘
 
-┌──────────────┐      HTTP POST         ┌─────────────────────┐
+┌──────────────┐     HTTPS POST          ┌─────────────────────┐
 │  SIM-Relay   │─────────────────────────▶│  SIM-Orchestrator  │
-│  (ESP32)     │   JSON: {sender,        │  (C# ASP.NET)      │
-│              │          text,          │                     │
-│  - A7670X    │          timestamp}     │  - Receives SMS     │
-│  - TinyGSM   │                         │  - Stores in DB     │
-│  - HTTP      │◀────────────────────────│  - Sends to TG      │
-│              │      200 OK / 500       │  - Retry logic      │
+│  (ESP32)     │   X-API-Key header      │  (C# ASP.NET)      │
+│              │   JSON: {sender,        │                     │
+│  - A7670X    │          text,          │  - API Key Auth     │
+│  - TinyGSM   │          timestamp}     │  - Receives SMS     │
+│  - HTTPS/SSL │◀────────────────────────│  - Stores in DB     │
+│              │      200 OK / 4xx / 5xx │  - Sends to TG      │
 └──────┬───────┘                         └──────────┬──────────┘
        │                                            │
        │ AT Commands                                │ HTTPS
@@ -62,17 +62,28 @@ Cellular Network
 │  HttpSender             │
 │  - Creates JSON         │
 │  - POST /api/sms        │
+│  - Adds X-API-Key       │
+│  - Uses TLS/SSL         │
 │  - Waits for 200 OK     │
 └─────────────────────────┘
       │
-      │ HTTP POST
+      │ HTTPS POST (TLS)
       │ Content-Type: application/json
+      │ X-API-Key: <secret-key>
       │ {
       │   "sender": "+79991234567",
       │   "text": "Текст сообщения",
       │   "timestamp": "2025-12-26 14:30:15"
       │ }
       ▼
+┌─────────────────────────┐
+│  ApiKeyMiddleware       │
+│  - Validates X-API-Key  │
+│  - 401 if missing       │
+│  - 403 if invalid       │
+└────────────┬────────────┘
+             │
+             ▼
 ┌─────────────────────────┐
 │  SmsController.cs       │
 │  POST /api/sms          │
@@ -233,12 +244,15 @@ Device → Server → Telegram → Success
 
 ### Device → Server
 
-- **Protocol**: HTTP (no TLS)
-- **Port**: 80 (configurable)
+- **Protocol**: HTTPS (TLS via modem)
+- **Port**: 443 (configurable)
 - **Method**: POST
 - **Path**: `/api/sms`
-- **Content-Type**: `application/json`
+- **Headers**:
+  - `Content-Type: application/json`
+  - `X-API-Key: <secret-key>`
 - **Timeout**: 30 seconds
+- **Authentication**: API Key validation via middleware
 
 ### Server → Telegram
 
@@ -270,16 +284,18 @@ Device → Server → Telegram → Success
 
 ### Device Layer
 
-- ✅ No sensitive data stored (except APN)
-- ✅ No TLS complexity (delegated to server)
+- ✅ HTTPS/TLS encryption (via A76xx modem SSL)
+- ✅ API Key authentication (X-API-Key header)
+- ✅ Secrets separated (secrets.h, git-ignored)
 - ✅ Minimal attack surface
-- ⚠️ HTTP only (LAN/VPN recommended)
+- ✅ No hardcoded credentials in version control
 
 ### Server Layer
 
-- ✅ HTTPS for Telegram (TLS certificates)
+- ✅ HTTPS for all endpoints (TLS certificates)
+- ✅ API Key middleware (401/403 responses)
+- ✅ HTTPS for Telegram (TLS 1.2+)
 - ✅ Database encryption at rest (optional)
-- ✅ API authentication (recommended: API keys)
 - ✅ Rate limiting (recommended)
 - ✅ Input validation
 - ✅ Structured logging (no PII in logs)
@@ -342,9 +358,10 @@ Device → Server → Telegram → Success
 | Platform | ESP32 (Espressif) |
 | Framework | Arduino / ESP-IDF |
 | Build System | PlatformIO |
-| Modem Library | TinyGSM (fork) |
-| HTTP Client | ArduinoHttpClient |
+| Modem Library | TinyGSM (SSL fork) |
+| HTTPS Client | TinyGsmClientSecure + ArduinoHttpClient |
 | JSON | ArduinoJson |
+| Security | X-API-Key authentication |
 
 ### Server (SIM-Orchestrator)
 
@@ -352,6 +369,7 @@ Device → Server → Telegram → Success
 |-----------|------------|
 | Runtime | .NET 8.0 |
 | Framework | ASP.NET Core Web API |
+| Authentication | ApiKeyMiddleware (X-API-Key) |
 | ORM | Entity Framework Core |
 | Database | SQLite / PostgreSQL / SQL Server |
 | HTTP Client | HttpClient (built-in) |
@@ -365,7 +383,8 @@ Device → Server → Telegram → Success
 ```
 ┌──────────────┐      ┌──────────────┐
 │  Device      │──────▶│  Localhost   │
-│  (USB)       │ HTTP  │  :5000       │
+│  (USB)       │ HTTPS │  :5001       │
+│              │ +Key  │  (self-sign) │
 └──────────────┘       └──────────────┘
 ```
 
@@ -374,8 +393,8 @@ Device → Server → Telegram → Success
 ```
 ┌──────────────┐      ┌──────────────┐
 │  Device      │──────▶│  Server      │
-│  (Battery)   │ HTTP  │  Ubuntu      │
-│              │       │  systemd     │
+│  (Battery)   │ HTTPS │  Ubuntu      │
+│              │ +Key  │  systemd     │
 └──────────────┘       └──────────────┘
          │                    │
          │ GPRS               │ Internet
@@ -388,8 +407,8 @@ Device → Server → Telegram → Success
 ```
 ┌──────────────┐      ┌──────────────┐
 │  Device      │──────▶│  Reverse     │
-│  (Battery)   │ HTTP  │  Proxy       │
-│              │       │  (nginx)     │
+│  (Battery)   │ HTTPS │  Proxy       │
+│              │ +Key  │  (nginx+SSL) │
 └──────────────┘       └──────┬───────┘
          │                    │
          │                    ▼
@@ -410,7 +429,7 @@ Device → Server → Telegram → Success
 
 The SIM Gateway system is designed with clear separation of concerns:
 
-- **Device** (SIM-Relay): Simple, reliable SMS forwarding
+- **Device** (SIM-Relay): Simple, reliable, secure SMS forwarding
 - **Server** (SIM-Orchestrator): Complex logic, persistence, integrations
 
 This architecture ensures:
@@ -418,4 +437,4 @@ This architecture ensures:
 - ✅ Maintainability (minimal device code)
 - ✅ Reliability (retry mechanisms)
 - ✅ Scalability (stateless server)
-- ✅ Security (HTTPS on server side)
+- ✅ Security (HTTPS + API Key authentication end-to-end)

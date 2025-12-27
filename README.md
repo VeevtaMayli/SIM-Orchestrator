@@ -10,19 +10,20 @@ SIM-Orchestrator is a C# ASP.NET Core Web API server that receives SMS messages 
 
 ```
 SIM-Relay Device
-      ↓  HTTP POST (JSON)
+      ↓  HTTPS POST (JSON + X-API-Key)
 SIM-Orchestrator (This Server)
+      ├→ API Key Authentication
       ├→ Database (SQL Server/PostgreSQL/SQLite)
       └→ Telegram Bot API (HTTPS)
 ```
 
 ## Features
 
-- **HTTP API**: Receives SMS from SIM-Relay devices
+- **HTTPS API**: Secure TLS-encrypted endpoint for SMS reception
+- **API Key Authentication**: X-API-Key header validation via middleware
 - **Database Storage**: Persists all SMS with delivery status
 - **Telegram Integration**: Sends SMS to Telegram bot/channel
 - **Retry Mechanism**: Automatic retry for failed Telegram sends
-- **HTTPS Handling**: All TLS/certificate complexity on server side
 - **Logging**: Comprehensive logging for monitoring
 - **Cross-platform**: Runs on Ubuntu, Windows, Docker
 
@@ -40,7 +41,9 @@ SIM-Orchestrator/
 ├── SIM-Orchestrator.sln
 ├── SIM-Orchestrator/
 │   ├── Program.cs                 # Application entry point
-│   ├── appsettings.json           # Configuration
+│   ├── appsettings.json           # Configuration (use .example as template)
+│   ├── Middleware/
+│   │   └── ApiKeyMiddleware.cs    # X-API-Key authentication
 │   ├── Controllers/
 │   │   └── SmsController.cs       # POST /api/sms endpoint
 │   ├── Services/
@@ -106,26 +109,26 @@ dotnet add package Microsoft.Extensions.Http
 
 ### 4. Configuration
 
-Edit `appsettings.json`:
+Copy `appsettings.json.example` to `appsettings.json` and edit:
 
 ```json
 {
-  "ConnectionStrings": {
-    "DefaultConnection": "Data Source=sms_gateway.db"
-  },
-  "Telegram": {
-    "BotToken": "YOUR_BOT_TOKEN_HERE",
-    "ChatId": "YOUR_CHAT_ID_HERE"
-  },
   "Logging": {
     "LogLevel": {
       "Default": "Information",
       "Microsoft.AspNetCore": "Warning"
     }
   },
-  "AllowedHosts": "*"
+  "AllowedHosts": "*",
+  "ApiKey": "your-secret-api-key-min-32-characters-long",
+  "TelegramBot": {
+    "Token": "YOUR_TELEGRAM_BOT_TOKEN",
+    "ChatId": "YOUR_CHAT_ID"
+  }
 }
 ```
+
+**Important**: The `ApiKey` must match the key configured in your SIM-Relay device's `secrets.h`.
 
 #### Get Telegram Bot Token
 
@@ -710,8 +713,9 @@ services:
 ### Test with curl
 
 ```bash
-curl -X POST http://localhost:5000/api/sms \
+curl -X POST https://localhost:5001/api/sms \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: your-secret-api-key-min-32-characters-long" \
   -d '{
     "sender": "+79991234567",
     "text": "Тестовое сообщение",
@@ -726,6 +730,10 @@ Expected response:
   "id": 1
 }
 ```
+
+Error responses:
+- `401 Unauthorized` - Missing X-API-Key header
+- `403 Forbidden` - Invalid API key
 
 ### Check logs
 
@@ -774,7 +782,8 @@ public IActionResult Health()
 
 Test:
 ```bash
-curl http://localhost:5000/api/sms/health
+curl https://localhost:5001/api/sms/health \
+  -H "X-API-Key: your-secret-api-key"
 ```
 
 ## Troubleshooting
@@ -795,17 +804,29 @@ curl http://localhost:5000/api/sms/health
 
 ### SIM-Relay can't connect
 
-1. Verify server is running: `curl http://localhost:5000/api/sms/health`
-2. Check firewall rules (open port 5000 or 80)
-3. For remote server, use public IP or domain
-4. Test with curl from device's network
+1. Verify server is running and API key is valid
+2. Check firewall rules (open port 443 for HTTPS)
+3. Verify SSL certificate is valid
+4. Ensure API key in device `secrets.h` matches server `appsettings.json`
+5. Test with curl from device's network:
+   ```bash
+   curl -X POST https://your-server.com/api/sms \
+     -H "X-API-Key: your-api-key" \
+     -H "Content-Type: application/json" \
+     -d '{"sender":"test","text":"test","timestamp":"test"}'
+   ```
 
 ## Security
 
+### Implemented
+
+- [x] **API Key Authentication**: X-API-Key header validation via `ApiKeyMiddleware`
+- [x] **HTTPS Support**: TLS encryption for all API endpoints
+
 ### Production Checklist
 
-- [ ] Use HTTPS (SSL certificate via Let's Encrypt)
-- [ ] Implement API authentication (API keys, JWT)
+- [x] API Key authentication (implemented)
+- [ ] Use HTTPS with valid SSL certificate (Let's Encrypt)
 - [ ] Rate limiting for `/api/sms` endpoint
 - [ ] Restrict allowed IPs (if device has static IP)
 - [ ] Use environment variables for secrets
@@ -814,12 +835,13 @@ curl http://localhost:5000/api/sms/health
 
 ### Environment Variables
 
-Instead of `appsettings.json`, use:
+Instead of `appsettings.json`, use environment variables for secrets:
 
 ```bash
+export ApiKey="your-secret-api-key-min-32-characters-long"
 export ConnectionStrings__DefaultConnection="..."
-export Telegram__BotToken="..."
-export Telegram__ChatId="..."
+export TelegramBot__Token="..."
+export TelegramBot__ChatId="..."
 dotnet run
 ```
 
