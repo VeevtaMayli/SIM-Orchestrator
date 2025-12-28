@@ -1,15 +1,19 @@
+using System.Security.Cryptography;
+using System.Text;
+
 namespace SIMOrchestrator.Middleware;
 
 public class ApiKeyMiddleware
 {
     private readonly RequestDelegate _next;
-    private readonly string _apiKey;
+    private readonly byte[] _apiKeyBytes;
 
     public ApiKeyMiddleware(RequestDelegate next, IConfiguration configuration)
     {
         _next = next;
-        _apiKey = configuration["ApiKey"]
+        var apiKey = configuration["ApiKey"]
             ?? throw new InvalidOperationException("ApiKey not configured");
+        _apiKeyBytes = Encoding.UTF8.GetBytes(apiKey);
     }
 
     public async Task InvokeAsync(HttpContext context)
@@ -27,7 +31,9 @@ public class ApiKeyMiddleware
             return;
         }
 
-        if (!_apiKey.Equals(extractedApiKey))
+        // Constant-time comparison to prevent timing attacks
+        var extractedBytes = Encoding.UTF8.GetBytes(extractedApiKey.ToString());
+        if (!CryptographicOperations.FixedTimeEquals(_apiKeyBytes, extractedBytes))
         {
             context.Response.StatusCode = 403;
             await context.Response.WriteAsync("Invalid API Key");

@@ -34,6 +34,7 @@ bld/
 *.db-wal
 
 # Configuration (sensitive data)
+**/appsettings.json
 appsettings.Development.json
 appsettings.Production.json
 **/appsettings.local.json
