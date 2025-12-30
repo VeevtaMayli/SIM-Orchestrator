@@ -13,23 +13,69 @@ SIM-Orchestrator (this server)
       +--- Telegram Bot API
 ```
 
-## Quick Start
+## Quick Start (Docker) — Recommended
 
 ### 1. Prerequisites
 
-- .NET 8.0 SDK
-- Database: SQLite (dev) / PostgreSQL (prod)
-- Telegram Bot token and Chat ID
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Windows/Mac) or Docker Engine (Linux)
+- Telegram Bot token and Chat ID (see [Telegram Setup](#telegram-setup))
 
 ### 2. Configuration
+
+Create `.env` file in project root:
+
+```bash
+API_KEY=your-secret-api-key-min-32-characters-long
+TELEGRAM_BOT_TOKEN=123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11
+TELEGRAM_CHAT_ID=123456789
+```
+
+**Important**: `API_KEY` must match `API_KEY` in SIM-Relay's `secrets.h`.
+
+### 3. Run
+
+```bash
+docker-compose up -d
+```
+
+Server starts on `http://localhost:5000`.
+
+### 4. Verify
+
+```bash
+curl http://localhost:5000/health
+```
+
+### 5. View logs
+
+```bash
+docker-compose logs -f
+```
+
+### 6. Stop
+
+```bash
+docker-compose down
+```
+
+---
+
+## Alternative: Manual Run (without Docker)
+
+### Prerequisites
+
+- .NET 8.0 SDK
+- Database: SQLite (dev) / PostgreSQL (prod)
+
+### Configuration
 
 Copy `appsettings.json.example` to `appsettings.json`:
 
 ```json
 {
   "ApiKey": "your-secret-api-key-min-32-characters-long",
-  "TelegramBot": {
-    "Token": "123456:ABC-DEF...",
+  "Telegram": {
+    "BotToken": "123456:ABC-DEF...",
     "ChatId": "your-chat-id"
   },
   "ConnectionStrings": {
@@ -38,9 +84,7 @@ Copy `appsettings.json.example` to `appsettings.json`:
 }
 ```
 
-**Important**: `ApiKey` must match `API_KEY` in SIM-Relay's `secrets.h`.
-
-### 3. Run
+### Run
 
 ```bash
 cd src/SIM-Orchestrator
@@ -48,7 +92,7 @@ dotnet ef database update
 dotnet run
 ```
 
-Server starts on `https://localhost:5001`.
+Server starts on `http://localhost:5000`.
 
 ## API
 
@@ -122,14 +166,35 @@ WantedBy=multi-user.target
 sudo systemctl enable --now sim-orchestrator
 ```
 
-### Docker
+### Docker (Production)
+
+Using docker-compose (recommended):
 
 ```bash
-docker build -t sim-orchestrator .
-docker run -p 5000:80 \
+# Create .env file with your settings
+cat > .env << EOF
+API_KEY=your-secret-api-key-min-32-characters-long
+TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
+TELEGRAM_CHAT_ID=123456789
+EOF
+
+# Start the service
+docker-compose up -d
+
+# Check status
+docker-compose ps
+docker-compose logs -f
+```
+
+Or build and run manually:
+
+```bash
+docker build -t sim-orchestrator ./src/SIM-Orchestrator
+docker run -d -p 5000:8080 \
   -e ApiKey="your-api-key" \
-  -e TelegramBot__Token="your-bot-token" \
-  -e TelegramBot__ChatId="your-chat-id" \
+  -e Telegram__BotToken="your-bot-token" \
+  -e Telegram__ChatId="your-chat-id" \
+  -v sms-data:/data \
   sim-orchestrator
 ```
 

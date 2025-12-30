@@ -38,6 +38,7 @@ bld/
 appsettings.Development.json
 appsettings.Production.json
 **/appsettings.local.json
+.env
 
 # User-specific files
 *.rsuser
