@@ -7,7 +7,7 @@ services:
       context: ./src/SIM-Orchestrator
       dockerfile: Dockerfile
     ports:
-      - "5000:8080"
+      - "127.0.0.1:5000:8080"  # Only accessible via localhost (Caddy reverse proxy)
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
       - ConnectionStrings__DefaultConnection=Data Source=/data/sms_gateway.db
