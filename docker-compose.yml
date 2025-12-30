@@ -2,6 +2,7 @@ version: '3.8'
 
 services:
   api:
+    image: ${DOCKER_IMAGE:-sim-orchestrator:local}
     build:
       context: ./src/SIM-Orchestrator
       dockerfile: Dockerfile
@@ -10,9 +11,9 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
       - ConnectionStrings__DefaultConnection=Data Source=/data/sms_gateway.db
-      - ApiKey=${API_KEY:-your-secret-api-key-min-32-characters-long}
-      - Telegram__BotToken=${TELEGRAM_BOT_TOKEN:-YOUR_BOT_TOKEN}
-      - Telegram__ChatId=${TELEGRAM_CHAT_ID:-YOUR_CHAT_ID}
+      - ApiKey=${API_KEY}
+      - Telegram__BotToken=${TELEGRAM_BOT_TOKEN}
+      - Telegram__ChatId=${TELEGRAM_CHAT_ID}
     volumes:
       - sms-data:/data
     restart: unless-stopped
