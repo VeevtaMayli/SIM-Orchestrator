@@ -137,6 +137,80 @@ src/SIM-Orchestrator/
 
 ## Deployment
 
+### Production with HTTPS (Caddy)
+
+**Prerequisites:**
+- VPS with Ubuntu 24.04
+- Docker and docker-compose installed
+- Ports 80, 443 open in firewall
+
+**1. Install Caddy:**
+
+```bash
+# Download and run setup script
+wget https://raw.githubusercontent.com/YOUR_USERNAME/SIM-Orchestrator/main/setup-caddy.sh
+chmod +x setup-caddy.sh
+./setup-caddy.sh
+```
+
+Or manually:
+
+```bash
+# Install Caddy
+sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo apt update
+sudo apt install -y caddy
+
+# Create Caddyfile
+sudo nano /etc/caddy/Caddyfile
+```
+
+Paste:
+
+```
+%YOUR_DOMAIN% {
+    reverse_proxy localhost:5000
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Frame-Options "DENY"
+        X-Content-Type-Options "nosniff"
+        X-XSS-Protection "1; mode=block"
+    }
+
+    log {
+        output file /var/log/caddy/sim-orchestrator.log
+        format json
+    }
+}
+```
+
+**2. Start services:**
+
+```bash
+# Open firewall
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+
+# Start Caddy
+sudo systemctl enable caddy
+sudo systemctl restart caddy
+
+# Deploy SIM-Orchestrator
+cd ~/sim-orchestrator
+docker compose up -d
+```
+
+**3. Verify HTTPS:**
+
+```bash
+curl -I https://%YOUR_DOMAIN%/health
+```
+
+Caddy automatically provisions Let's Encrypt SSL certificates.
+
 ### systemd (Ubuntu)
 
 ```bash
