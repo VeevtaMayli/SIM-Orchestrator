@@ -29,7 +29,7 @@ public class HealthController : ControllerBase
             return Ok(new
             {
                 status = "healthy",
-                timestamp = DateTime.UtcNow,
+                timestamp = DateTimeOffset.UtcNow,
                 database = "connected",
                 unsentMessages = unsentCount
             });
@@ -40,7 +40,7 @@ public class HealthController : ControllerBase
             return StatusCode(503, new
             {
                 status = "unhealthy",
-                timestamp = DateTime.UtcNow,
+                timestamp = DateTimeOffset.UtcNow,
                 error = ex.Message
             });
         }
