@@ -69,10 +69,24 @@ public class TelegramService : ITelegramService
             ? sms.ReceivedAt.ToString("yyyy-MM-dd HH:mm:ss")
             : sms.Timestamp;
 
-        return $"<b>SMS Received</b>\n\n" +
-               $"<b>From:</b> {EscapeHtml(sms.Sender)}\n" +
-               $"<b>Time:</b> {timestamp}\n\n" +
-               $"{EscapeHtml(sms.Text)}";
+        // Format text: highlight numbers with monospace for easy copying (OTP codes, etc.)
+        var formattedText = HighlightNumbers(EscapeHtml(sms.Text));
+
+        return $"{formattedText}\n\n" +
+               $"👤 {EscapeHtml(sms.Sender)}\n" +
+               $"🕒 {timestamp}\n" +
+               $"📥 {sms.ReceivedAt:yyyy-MM-dd HH:mm:ss}";
+    }
+
+    private static string HighlightNumbers(string text)
+    {
+        // Highlight sequences of 4+ digits with monospace font
+        // Regex: \b\d{4,}\b matches word-bounded digit sequences (4 or more)
+        return System.Text.RegularExpressions.Regex.Replace(
+            text,
+            @"\b(\d{4,})\b",
+            "<code>$1</code>"
+        );
     }
 
     private static string EscapeHtml(string text)

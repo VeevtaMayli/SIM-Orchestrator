@@ -27,10 +27,13 @@
 ### 1. SMS Reception
 
 ```
-Cellular Network → SIM Card → A7670 Modem → SmsReader
+Cellular Network → SIM Card → A7670 Modem → SmsManager
                                               │
                                               ▼
-                                        Parse UCS2→UTF-8
+                                        PDU Parser (GSM7/UCS2 → UTF-8)
+                                              │
+                                              ▼
+                                        SmsConcatenator (multi-part buffering)
 ```
 
 ### 2. Device → Server
