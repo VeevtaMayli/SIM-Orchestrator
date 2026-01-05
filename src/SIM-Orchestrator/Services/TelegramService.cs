@@ -65,17 +65,33 @@ public class TelegramService : ITelegramService
 
     private static string FormatMessage(SmsMessage sms)
     {
-        var timestamp = string.IsNullOrEmpty(sms.Timestamp)
-            ? sms.ReceivedAt.ToString("yyyy-MM-dd HH:mm:ss")
-            : sms.Timestamp;
+        string sentTimeFormatted;
+        if (!string.IsNullOrEmpty(sms.Timestamp) &&
+            DateTimeOffset.TryParse(sms.Timestamp, out var sentTime))
+        {
+            sentTimeFormatted = sentTime.ToString("yyyy-MM-dd HH:mm:ss zzz");
+        }
+        else
+        {
+            // Fallback: show raw timestamp or ReceivedAt
+            sentTimeFormatted = string.IsNullOrEmpty(sms.Timestamp)
+                ? new DateTimeOffset(sms.ReceivedAt).ToString("yyyy-MM-dd HH:mm:ss zzz")
+                : sms.Timestamp;
+        }
+
+        // Show ReceivedAt with server timezone (assume UTC if Kind is Unspecified)
+        var receivedTime = sms.ReceivedAt.Kind == DateTimeKind.Unspecified
+            ? new DateTimeOffset(sms.ReceivedAt, TimeSpan.Zero)
+            : new DateTimeOffset(sms.ReceivedAt);
+        var receivedTimeFormatted = receivedTime.ToString("yyyy-MM-dd HH:mm:ss zzz");
 
         // Format text: highlight numbers with monospace for easy copying (OTP codes, etc.)
         var formattedText = HighlightNumbers(EscapeHtml(sms.Text));
 
         return $"{formattedText}\n\n" +
                $"👤 {EscapeHtml(sms.Sender)}\n" +
-               $"🕒 {timestamp}\n" +
-               $"📥 {sms.ReceivedAt:yyyy-MM-dd HH:mm:ss}";
+               $"🕒 {sentTimeFormatted}\n" +
+               $"📥 {receivedTimeFormatted}";
     }
 
     private static string HighlightNumbers(string text)
