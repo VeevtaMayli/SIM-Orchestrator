@@ -97,10 +97,10 @@ public class TelegramService : ITelegramService
     private static string HighlightNumbers(string text)
     {
         // Highlight sequences of 4+ digits with monospace font
-        // Regex: \b\d{4,}\b matches word-bounded digit sequences (4 or more)
+        // Regex: (?<!\d)\d{4,}(?!\d) matches digit sequences (4 or more) not surrounded by other digits
         return System.Text.RegularExpressions.Regex.Replace(
             text,
-            @"\b(\d{4,})\b",
+            @"(?<!\d)(\d{4,})(?!\d)",
             "<code>$1</code>"
         );
     }
