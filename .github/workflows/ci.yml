@@ -60,6 +60,18 @@ jobs:
           path: TestResults
           retention-days: 14
 
+      - name: Coverage summary
+        if: always()
+        continue-on-error: true
+        run: |
+          dotnet tool install --global dotnet-reportgenerator-globaltool
+          reportgenerator \
+            -reports:"TestResults/**/coverage.cobertura.xml" \
+            -targetdir:TestResults/coverage-report \
+            -reporttypes:MarkdownSummaryGithub \
+            -classfilters:"-*.Migrations.*;-System.Text.RegularExpressions.Generated.*"
+          cat TestResults/coverage-report/SummaryGithub.md >> "$GITHUB_STEP_SUMMARY"
+
   build-and-push:
     name: Build Docker image
     needs: test

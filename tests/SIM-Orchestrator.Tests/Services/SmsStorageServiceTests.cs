@@ -248,4 +248,41 @@ public class SmsStorageServiceTests : IDisposable
         Assert.Equal(2, await service.CountUnsentAsync());
         Assert.Equal(2, await service.CountFailedAsync());
     }
+
+    [Fact]
+    public async Task SaveSmsAsync_NonUniqueInsertFailure_IsRethrown()
+    {
+        using var context = _db.CreateContext();
+        // Text is NOT NULL in the schema: the insert fails for a reason other than a duplicate key.
+        var request = new SmsRequest { Sender = "+1", Text = null! };
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => CreateService(context).SaveSmsAsync(request));
+
+        Assert.Equal(0, await context.SmsMessages.CountAsync());
+    }
+
+    [Fact]
+    public async Task MarkSentAndMarkFailed_UnknownId_AreNoOps()
+    {
+        await SeedAsync(DeliveryStatus.Pending);
+        using var context = _db.CreateContext();
+        var service = CreateService(context);
+
+        await service.MarkSentAsync(12345, Now);
+        await service.MarkAttemptFailedAsync(12345, "x", Now);
+
+        Assert.Equal(1, await service.CountUnsentAsync());
+        Assert.Equal(0, await service.CountFailedAsync());
+    }
+
+    [Fact]
+    public async Task ReleaseAsync_EmptyList_IsNoOp()
+    {
+        var claimed = await SeedAsync(DeliveryStatus.InProgress, leaseExpiresAt: Now.AddMinutes(2));
+        using var context = _db.CreateContext();
+
+        await CreateService(context).ReleaseAsync([], Now);
+
+        Assert.Equal(DeliveryStatus.InProgress, (await LoadAsync(claimed.Id)).Status);
+    }
 }

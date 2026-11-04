@@ -156,10 +156,30 @@ public class MessageFormatterTests
     [Fact]
     public void Format_LongText_NeverSplitsSurrogatePairs()
     {
-        var text = string.Concat(Enumerable.Repeat("😀", 2500));
+        // One leading char shifts every pair by one, so a naive cut at the chunk
+        // boundary would land between a high and a low surrogate.
+        var text = "a" + string.Concat(Enumerable.Repeat("😀", 2500));
         var parts = new MessageFormatter(TimeZoneInfo.Utc).Format(Sms(text));
 
         Assert.True(parts.Count >= 2);
-        Assert.All(parts, p => Assert.False(char.IsHighSurrogate(p[p.IndexOf("\n\n👤", StringComparison.Ordinal) - 1])));
+        foreach (var part in parts)
+        {
+            var body = part[..part.IndexOf("\n\n👤", StringComparison.Ordinal)];
+            Assert.False(char.IsHighSurrogate(body[^1]), "part ends with a lone high surrogate");
+            Assert.False(char.IsLowSurrogate(body[0]), "part starts with a lone low surrogate");
+        }
+        var reassembled = string.Concat(parts.Select(p => p[..p.IndexOf("\n\n👤", StringComparison.Ordinal)]));
+        Assert.Equal(text, reassembled);
+    }
+
+    [Fact]
+    public void Format_ReceivedAtWithLocalKind_IsConvertedToUtcFirst()
+    {
+        var local = DateTime.SpecifyKind(ReceivedUtc, DateTimeKind.Utc).ToLocalTime();
+        Assert.Equal(DateTimeKind.Local, local.Kind);
+
+        var message = Single(new MessageFormatter(TimeZoneInfo.Utc), Sms("x", receivedAt: local));
+
+        Assert.Contains("📥 2025-12-28 11:35:00 +00:00", message);
     }
 }

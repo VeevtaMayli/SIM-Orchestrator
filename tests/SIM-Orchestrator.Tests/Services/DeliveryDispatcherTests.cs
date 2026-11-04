@@ -25,22 +25,28 @@ public class DeliveryDispatcherTests : IDisposable
 
     public void Dispose() => _db.Dispose();
 
-    private DeliveryDispatcher CreateDispatcher()
+    private readonly CapturingLoggerProvider _logs = new();
+
+    private DeliveryDispatcher CreateDispatcher(ISmsStorageService? storageOverride = null)
     {
         var services = new ServiceCollection();
         services.AddSingleton<TimeProvider>(_time);
         services.AddDbContext<AppDbContext>(o => o.UseSqlite(_db.ConnectionString));
-        services.AddScoped<ISmsStorageService, SmsStorageService>();
+        if (storageOverride is null)
+            services.AddScoped<ISmsStorageService, SmsStorageService>();
+        else
+            services.AddSingleton(storageOverride);
         services.AddSingleton<ITelegramService>(_telegram);
         services.AddLogging();
         var provider = services.BuildServiceProvider();
 
+        using var loggerFactory = new LoggerFactory([_logs]);
         return new DeliveryDispatcher(
             provider.GetRequiredService<IServiceScopeFactory>(),
             _queue,
             Microsoft.Extensions.Options.Options.Create(_options),
             _time,
-            Mock.Of<ILogger<DeliveryDispatcher>>());
+            loggerFactory.CreateLogger<DeliveryDispatcher>());
     }
 
     private async Task<SmsMessage> SeedAsync(string text, DeliveryStatus status = DeliveryStatus.Pending, int attempts = 0, DateTime? receivedAt = null)
@@ -217,5 +223,75 @@ public class DeliveryDispatcherTests : IDisposable
         {
             await dispatcher.StopAsync(CancellationToken.None);
         }
+    }
+
+    [Fact]
+    public async Task ProcessPending_PausesBetweenMessagesUsingTheTimeProvider()
+    {
+        _options.DelayBetweenMessages = TimeSpan.FromSeconds(1);
+        await SeedAsync("first", receivedAt: Now.AddMinutes(-2));
+        await SeedAsync("second", receivedAt: Now.AddMinutes(-1));
+
+        var run = CreateDispatcher().ProcessPendingAsync(CancellationToken.None);
+        await Task.Delay(100);
+
+        Assert.False(run.IsCompleted, "the pass should be waiting for the pause to elapse");
+        Assert.Single(_telegram.Sent);
+
+        _time.Advance(TimeSpan.FromSeconds(1));
+        await run.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(2, _telegram.Sent.Count);
+    }
+
+    [Fact]
+    public async Task BackgroundLoop_SurvivesAFailingPassAndStopsCleanly()
+    {
+        var brokenStorage = new Mock<ISmsStorageService>();
+        brokenStorage
+            .Setup(s => s.ClaimDueAsync(It.IsAny<int>(), It.IsAny<DateTime>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+        _options.PollInterval = TimeSpan.FromHours(1);
+        var dispatcher = CreateDispatcher(brokenStorage.Object);
+
+        await dispatcher.StartAsync(CancellationToken.None);
+        try
+        {
+            // The start-up pass fails; a signal must still trigger another pass.
+            _queue.Signal();
+            var deadline = DateTime.UtcNow.AddSeconds(5);
+            while (_logs.Entries.Count(e => e.Level == LogLevel.Error) < 2 && DateTime.UtcNow < deadline)
+                await Task.Delay(20);
+        }
+        finally
+        {
+            await dispatcher.StopAsync(CancellationToken.None);
+        }
+
+        Assert.True(_logs.Entries.Count(e => e.Level == LogLevel.Error) >= 2, "each failing pass is logged and the loop goes on");
+        Assert.Contains(_logs.Entries, e => e.Message.Contains("stopped"));
+        Assert.All(_logs.Entries, e => Assert.DoesNotContain("Unhandled", e.Message));
+    }
+
+    [Fact]
+    public async Task BackgroundLoop_StopWhileDelivering_CancelsTheHangingSend()
+    {
+        await SeedAsync("hang");
+        var sendStarted = new TaskCompletionSource();
+        _telegram.Handler = async (_, ct) =>
+        {
+            sendStarted.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+            return TelegramSendResult.Ok();
+        };
+        var dispatcher = CreateDispatcher();
+
+        await dispatcher.StartAsync(CancellationToken.None);
+        await sendStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var stop = dispatcher.StopAsync(CancellationToken.None);
+        await stop.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Contains(_logs.Entries, e => e.Message.Contains("stopped"));
     }
 }
