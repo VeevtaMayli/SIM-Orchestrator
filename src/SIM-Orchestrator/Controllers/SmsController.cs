@@ -10,37 +10,35 @@ namespace SIMOrchestrator.Controllers;
 public class SmsController : ControllerBase
 {
     private readonly ISmsStorageService _storage;
-    private readonly ITelegramService _telegram;
+    private readonly IDeliveryQueue _queue;
     private readonly ILogger<SmsController> _logger;
 
     public SmsController(
         ISmsStorageService storage,
-        ITelegramService telegram,
+        IDeliveryQueue queue,
         ILogger<SmsController> logger)
     {
         _storage = storage;
-        _telegram = telegram;
+        _queue = queue;
         _logger = logger;
     }
 
+    /// <summary>
+    /// Stores the SMS and answers immediately; delivery to Telegram happens in the
+    /// background. Re-sending the same SMS (device retry after a lost response)
+    /// returns the original id and does not create a second copy.
+    /// </summary>
     [HttpPost]
-    public async Task<IActionResult> ReceiveSms([FromBody] SmsRequest request)
+    public async Task<IActionResult> ReceiveSms([FromBody] SmsRequest request, CancellationToken cancellationToken)
     {
         _logger.LogInformation("Received SMS from {Sender}", SenderMasker.Mask(request.Sender));
 
-        var sms = await _storage.SaveSmsAsync(request);
+        var result = await _storage.SaveSmsAsync(request, cancellationToken);
 
-        var telegramSuccess = await _telegram.SendSmsToTelegramAsync(sms);
+        if (result.IsDuplicate)
+            return Ok(new { status = "duplicate", id = result.Sms.Id });
 
-        if (telegramSuccess)
-        {
-            await _storage.MarkAsSentAsync(sms.Id);
-        }
-        else
-        {
-            _logger.LogWarning("Telegram send failed for SMS {Id}, will retry later", sms.Id);
-        }
-
-        return Ok(new { status = "received", id = sms.Id });
+        _queue.Signal();
+        return Ok(new { status = "received", id = result.Sms.Id });
     }
 }

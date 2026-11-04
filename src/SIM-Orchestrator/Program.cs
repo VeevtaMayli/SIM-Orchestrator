@@ -54,13 +54,20 @@ if (builder.Environment.IsDevelopment())
         options.AnonymousPathPrefixes = [.. options.AnonymousPathPrefixes, "/swagger"]);
 }
 
+builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<ISmsStorageService, SmsStorageService>();
+
+// Outbox: requests only store and signal; the dispatcher delivers with retries.
+builder.Services.AddOptions<DeliveryOptions>()
+    .BindConfiguration(DeliveryOptions.SectionName)
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+builder.Services.AddSingleton<IDeliveryQueue, DeliveryQueue>();
+builder.Services.AddHostedService<DeliveryDispatcher>();
 
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<AppDbContext>(HealthResponseWriter.DatabaseCheckName)
     .AddCheck<SmsBacklogHealthCheck>(SmsBacklogHealthCheck.Name);
-
-builder.Services.AddHostedService<RetryService>();
 
 var app = builder.Build();
 

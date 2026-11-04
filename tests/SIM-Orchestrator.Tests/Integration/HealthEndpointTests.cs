@@ -45,4 +45,28 @@ public class HealthEndpointTests
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         }
     }
+
+    [Fact]
+    public async Task Health_WithPermanentlyFailedMessages_IsDegraded()
+    {
+        using var factory = new SimOrchestratorFactory();
+        var client = factory.CreateClient();
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<SIMOrchestrator.Data.AppDbContext>();
+            db.SmsMessages.Add(new SIMOrchestrator.Models.SmsMessage
+            {
+                Sender = "+1", Text = "gave up", DedupKey = "failed-1", ReceivedAt = DateTime.UtcNow,
+                Status = SIMOrchestrator.Models.DeliveryStatus.Failed, Attempts = 20
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var response = await client.GetAsync("/health");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("degraded", body.GetProperty("status").GetString());
+        Assert.Equal(1, body.GetProperty("failedMessages").GetInt32());
+    }
 }

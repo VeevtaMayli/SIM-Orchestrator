@@ -37,7 +37,9 @@ public class SimOrchestratorFactory : WebApplicationFactory<Program>
         ["ApiKey"] = ApiKey,
         ["Telegram:BotToken"] = BotToken,
         ["Telegram:ChatId"] = "42",
-        ["ConnectionStrings:DefaultConnection"] = "Data Source=overridden-by-fixture"
+        ["ConnectionStrings:DefaultConnection"] = "Data Source=overridden-by-fixture",
+        // Tests post bursts of messages; do not pace deliveries one second apart.
+        ["Delivery:DelayBetweenMessages"] = "00:00:00"
     };
 
     /// <summary>Extra service registrations applied after the fixture's own overrides.</summary>

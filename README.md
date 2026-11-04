@@ -106,8 +106,15 @@ curl -X POST https://your-server.com/api/sms \
   -d '{"sender": "+79991234567", "text": "Hello", "timestamp": "2025-12-28 14:30:00"}'
 ```
 
+The SMS is stored and the request returns immediately; delivery to Telegram happens in
+the background with retries. An optional `messageId` (up to 64 characters, assigned by
+the device) makes retries idempotent. Without it the server derives a key from
+`sender`, `timestamp` and `text`, so re-sending the same SMS after a lost response
+never creates a second copy.
+
 **Responses:**
-- `200 OK` — SMS received and saved
+- `200 OK` `{"status":"received","id":123}` — SMS stored, delivery queued
+- `200 OK` `{"status":"duplicate","id":123}` — this SMS was already stored; nothing new is sent
 - `400 Bad Request` — Validation failed (`sender` and `text` are required, `text` is at most 4000 characters)
 - `401 Unauthorized` — Missing or invalid `X-API-Key`
 - `429 Too Many Requests` — More than 60 requests per minute from one client IP
@@ -117,8 +124,28 @@ Request bodies larger than 64 KB are rejected.
 ### GET /health
 
 Health check endpoint, no API key required. Returns `200` with
-`{"status":"healthy","database":"connected","unsentMessages":0,...}` or `503` when a
-check fails. The response never contains internal error details.
+`{"status":"healthy","database":"connected","unsentMessages":0,"failedMessages":0,...}`,
+`200` with `"status":"degraded"` when some messages failed permanently (see below), or
+`503` when a check fails. The response never contains internal error details.
+
+### Delivery and retries
+
+Every stored SMS goes through `Pending → InProgress → Sent`. A failed Telegram call puts
+the message back to `Pending` with a growing delay (1, 5, 15, then 60 minutes); a `429`
+from Telegram is honoured via its `retry_after`. After `MaxAttempts` the message becomes
+`Failed`, is reported in `/health` as `failedMessages` and is not retried automatically.
+Texts that do not fit one Telegram message are sent in numbered parts.
+
+Defaults can be changed with environment variables:
+
+```bash
+Delivery__PollInterval=00:01:00        # how often to look for due messages
+Delivery__BatchSize=50
+Delivery__MaxAttempts=20
+Delivery__LeaseDuration=00:02:00       # how long a claimed message is reserved
+Delivery__DelayBetweenMessages=00:00:01
+Delivery__BackoffMinutes__0=1          # ... __1=5, __2=15, __3=60
+```
 
 ### API key rotation
 
@@ -143,7 +170,7 @@ src/SIM-Orchestrator/
 ├── Services/
 │   ├── SmsStorageService.cs  # Database operations
 │   ├── TelegramService.cs    # Telegram Bot API
-│   └── RetryService.cs       # Background retry worker
+│   └── DeliveryDispatcher.cs # Outbox worker: retries, backoff, failure handling
 ├── Middleware/
 │   └── ApiKeyMiddleware.cs   # X-API-Key validation
 ├── Options/                  # Validated configuration (ApiKey(s), Telegram)

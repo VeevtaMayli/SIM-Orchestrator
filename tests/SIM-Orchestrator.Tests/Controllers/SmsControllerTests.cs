@@ -10,56 +10,56 @@ namespace SIMOrchestrator.Tests.Controllers;
 
 public class SmsControllerTests
 {
-    private readonly Mock<ISmsStorageService> _storageMock;
-    private readonly Mock<ITelegramService> _telegramMock;
-    private readonly Mock<ILogger<SmsController>> _loggerMock;
+    private readonly Mock<ISmsStorageService> _storageMock = new();
+    private readonly Mock<IDeliveryQueue> _queueMock = new();
     private readonly SmsController _controller;
 
     public SmsControllerTests()
     {
-        _storageMock = new Mock<ISmsStorageService>();
-        _telegramMock = new Mock<ITelegramService>();
-        _loggerMock = new Mock<ILogger<SmsController>>();
-        _controller = new SmsController(_storageMock.Object, _telegramMock.Object, _loggerMock.Object);
+        _controller = new SmsController(_storageMock.Object, _queueMock.Object, Mock.Of<ILogger<SmsController>>());
     }
 
     [Fact]
-    public async Task ReceiveSms_ValidRequest_ReturnsOk()
+    public async Task ReceiveSms_NewMessage_ReturnsReceivedAndSignalsDispatcher()
     {
         var request = new SmsRequest { Sender = "+1234567890", Text = "Test message" };
-        var savedSms = new SmsMessage { Id = 1, Sender = request.Sender, Text = request.Text };
+        var saved = new SmsMessage { Id = 1, Sender = request.Sender, Text = request.Text };
+        _storageMock.Setup(s => s.SaveSmsAsync(request, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SaveSmsResult(saved, IsDuplicate: false));
 
-        _storageMock.Setup(s => s.SaveSmsAsync(request)).ReturnsAsync(savedSms);
-        _telegramMock.Setup(t => t.SendSmsToTelegramAsync(savedSms)).ReturnsAsync(true);
+        var result = await _controller.ReceiveSms(request, CancellationToken.None);
 
-        var result = await _controller.ReceiveSms(request);
-
-        var okResult = Assert.IsType<OkObjectResult>(result);
-        Assert.NotNull(okResult.Value);
-        _storageMock.Verify(s => s.MarkAsSentAsync(1), Times.Once);
+        var ok = Assert.IsType<OkObjectResult>(result);
+        Assert.Contains("received", ok.Value!.ToString());
+        _queueMock.Verify(q => q.Signal(), Times.Once);
     }
 
     [Fact]
-    public async Task ReceiveSms_TelegramFails_StillReturnsOk()
+    public async Task ReceiveSms_Duplicate_ReturnsSameIdWithoutSignalling()
     {
         var request = new SmsRequest { Sender = "+1234567890", Text = "Test message" };
-        var savedSms = new SmsMessage { Id = 1, Sender = request.Sender, Text = request.Text };
+        var existing = new SmsMessage { Id = 42, Sender = request.Sender, Text = request.Text };
+        _storageMock.Setup(s => s.SaveSmsAsync(request, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SaveSmsResult(existing, IsDuplicate: true));
 
-        _storageMock.Setup(s => s.SaveSmsAsync(request)).ReturnsAsync(savedSms);
-        _telegramMock.Setup(t => t.SendSmsToTelegramAsync(savedSms)).ReturnsAsync(false);
+        var result = await _controller.ReceiveSms(request, CancellationToken.None);
 
-        var result = await _controller.ReceiveSms(request);
-
-        var okResult = Assert.IsType<OkObjectResult>(result);
-        _storageMock.Verify(s => s.MarkAsSentAsync(It.IsAny<int>()), Times.Never);
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var body = ok.Value!.ToString()!;
+        Assert.Contains("duplicate", body);
+        Assert.Contains("42", body);
+        _queueMock.Verify(q => q.Signal(), Times.Never);
     }
 
     [Fact]
-    public async Task ReceiveSms_StorageFails_ThrowsException()
+    public async Task ReceiveSms_StorageFails_PropagatesException()
     {
         var request = new SmsRequest { Sender = "+1234567890", Text = "Test message" };
-        _storageMock.Setup(s => s.SaveSmsAsync(request)).ThrowsAsync(new Exception("DB error"));
+        _storageMock.Setup(s => s.SaveSmsAsync(request, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("DB error"));
 
-        await Assert.ThrowsAsync<Exception>(() => _controller.ReceiveSms(request));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _controller.ReceiveSms(request, CancellationToken.None));
+
+        _queueMock.Verify(q => q.Signal(), Times.Never);
     }
 }

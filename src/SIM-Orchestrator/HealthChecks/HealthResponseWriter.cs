@@ -19,11 +19,11 @@ public static class HealthResponseWriter
             : "unavailable";
 
         int? unsentMessages = null;
-        if (report.Entries.TryGetValue(SmsBacklogHealthCheck.Name, out var backlog)
-            && backlog.Data.TryGetValue(SmsBacklogHealthCheck.UnsentMessagesKey, out var value)
-            && value is int count)
+        int? failedMessages = null;
+        if (report.Entries.TryGetValue(SmsBacklogHealthCheck.Name, out var backlog))
         {
-            unsentMessages = count;
+            unsentMessages = ReadCount(backlog, SmsBacklogHealthCheck.UnsentMessagesKey);
+            failedMessages = ReadCount(backlog, SmsBacklogHealthCheck.FailedMessagesKey);
         }
 
         var payload = new
@@ -37,6 +37,7 @@ public static class HealthResponseWriter
             timestamp = DateTimeOffset.UtcNow,
             database,
             unsentMessages,
+            failedMessages,
             checks = report.Entries.ToDictionary(
                 e => e.Key,
                 e => e.Value.Status.ToString().ToLowerInvariant())
@@ -44,4 +45,7 @@ public static class HealthResponseWriter
 
         return context.Response.WriteAsJsonAsync(payload);
     }
+
+    private static int? ReadCount(HealthReportEntry entry, string key)
+        => entry.Data.TryGetValue(key, out var value) && value is int count ? count : null;
 }

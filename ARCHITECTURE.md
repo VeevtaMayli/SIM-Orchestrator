@@ -76,8 +76,11 @@ RetryService (every 5 min)
 | Scenario | Device Behavior | Server Behavior |
 |----------|-----------------|-----------------|
 | Server unreachable | Keep SMS on SIM, retry in 10s | — |
-| Server 500 | Keep SMS on SIM | SMS saved, RetryService retries Telegram |
-| Telegram down | — | SMS saved, RetryService retries in 5 min |
+| Server 500 | Keep SMS on SIM, resend | Resend is deduplicated by key, no second copy |
+| Response lost after 200 | Resend | Server answers `duplicate` with the original id |
+| Telegram down | — | SMS saved, dispatcher retries with backoff (1/5/15/60 min) |
+| Telegram 429 | — | Retried after `retry_after`, batch paused |
+| Telegram fails 20 times | — | Message `Failed`, `/health` degraded |
 | Success | Delete SMS from SIM | Mark as sent |
 
 ## Security
@@ -97,9 +100,15 @@ SmsMessages
 ├── Id (PK)
 ├── Sender (varchar 50)
 ├── Text (text)
-├── Timestamp (varchar 50)
-├── ReceivedAt (datetime)
-├── SentToTelegram (bool) -- indexed
+├── Timestamp (varchar 50)          -- as sent by the device
+├── ReceivedAt (datetime, UTC)      -- indexed
+├── DedupKey (varchar 80)           -- unique
+├── Status (int)                    -- Pending/InProgress/Sent/Failed, indexed with NextAttemptAt
+├── Attempts (int)
+├── NextAttemptAt (datetime, nullable)
+├── LeaseExpiresAt (datetime, nullable)
+├── LastError (varchar 500, nullable)
+├── SentToTelegram (bool)           -- legacy flag, equals Status = Sent
 └── SentToTelegramAt (datetime, nullable)
 ```
 
