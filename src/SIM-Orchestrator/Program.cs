@@ -1,17 +1,33 @@
 using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using SIMOrchestrator.Data;
+using SIMOrchestrator.HealthChecks;
 using SIMOrchestrator.Middleware;
+using SIMOrchestrator.Options;
 using SIMOrchestrator.Services;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// An SMS payload is a few kilobytes at most; anything larger is not a device.
+const long maxRequestBodyBytes = 64 * 1024;
+builder.WebHost.ConfigureKestrel(kestrel => kestrel.Limits.MaxRequestBodySize = maxRequestBodyBytes);
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-// Rate limiting: 60 requests per minute per IP
+// The app runs behind a reverse proxy (Caddy) on the same host: trust the
+// loopback proxy (the default KnownProxies/KnownNetworks) for the client IP
+// and scheme so that rate limiting sees the real client address.
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+});
+
+// Rate limiting: 60 requests per minute per client IP
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -29,13 +45,26 @@ builder.Services.AddRateLimiter(options =>
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")));
 
-builder.Services.AddHttpClient<ITelegramService, TelegramService>();
+builder.Services.AddTelegramClient();
+
+builder.Services.AddApiKeyAuthentication();
+if (builder.Environment.IsDevelopment())
+{
+    builder.Services.PostConfigure<ApiKeyOptions>(options =>
+        options.AnonymousPathPrefixes = [.. options.AnonymousPathPrefixes, "/swagger"]);
+}
 
 builder.Services.AddScoped<ISmsStorageService, SmsStorageService>();
+
+builder.Services.AddHealthChecks()
+    .AddDbContextCheck<AppDbContext>(HealthResponseWriter.DatabaseCheckName)
+    .AddCheck<SmsBacklogHealthCheck>(SmsBacklogHealthCheck.Name);
 
 builder.Services.AddHostedService<RetryService>();
 
 var app = builder.Build();
+
+app.UseForwardedHeaders();
 
 if (app.Environment.IsDevelopment())
 {
@@ -43,13 +72,16 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-app.UseHttpsRedirection();
-
 app.UseRateLimiter();
 
 app.UseMiddleware<ApiKeyMiddleware>();
 
 app.UseAuthorization();
+
+app.MapHealthChecks("/health", new HealthCheckOptions
+{
+    ResponseWriter = HealthResponseWriter.WriteAsync
+});
 
 app.MapControllers().RequireRateLimiting("fixed");
 

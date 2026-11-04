@@ -69,20 +69,19 @@ docker-compose down
 
 ### Configuration
 
-Copy `appsettings.json.example` to `appsettings.json`:
+Secrets are not stored in `appsettings.json`. Use environment variables or
+[user secrets](https://learn.microsoft.com/aspnet/core/security/app-secrets):
 
-```json
-{
-  "ApiKey": "your-secret-api-key-min-32-characters-long",
-  "Telegram": {
-    "BotToken": "123456:ABC-DEF...",
-    "ChatId": "your-chat-id"
-  },
-  "ConnectionStrings": {
-    "DefaultConnection": "Data Source=sms_gateway.db"
-  }
-}
+```bash
+cd src/SIM-Orchestrator
+dotnet user-secrets init
+dotnet user-secrets set "ApiKey" "your-secret-api-key-min-32-characters-long"
+dotnet user-secrets set "Telegram:BotToken" "123456:ABC-DEF..."
+dotnet user-secrets set "Telegram:ChatId" "your-chat-id"
+dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Data Source=sms_gateway.db"
 ```
+
+The server validates this configuration on startup and refuses to start if anything is missing.
 
 ### Run
 
@@ -109,26 +108,45 @@ curl -X POST https://your-server.com/api/sms \
 
 **Responses:**
 - `200 OK` — SMS received and saved
-- `401 Unauthorized` — Missing X-API-Key
-- `403 Forbidden` — Invalid API key
+- `400 Bad Request` — Validation failed (`sender` and `text` are required, `text` is at most 4000 characters)
+- `401 Unauthorized` — Missing or invalid `X-API-Key`
+- `429 Too Many Requests` — More than 60 requests per minute from one client IP
 
-### GET /api/health
+Request bodies larger than 64 KB are rejected.
 
-Health check endpoint.
+### GET /health
+
+Health check endpoint, no API key required. Returns `200` with
+`{"status":"healthy","database":"connected","unsentMessages":0,...}` or `503` when a
+check fails. The response never contains internal error details.
+
+### API key rotation
+
+Several keys can be active at once, so a key can be rotated without downtime:
+
+```bash
+API_KEY=current-key-min-32-characters-long
+API_KEY_NEXT=new-key-min-32-characters-long   # optional, also accepted while devices migrate
+```
+
+Every key must be at least 32 characters; the server refuses to start otherwise.
+When running without Docker, use `ApiKeys__0`, `ApiKeys__1`, ... environment variables
+(or the `ApiKeys` array in configuration).
 
 ## Project Structure
 
 ```
 src/SIM-Orchestrator/
 ├── Controllers/
-│   ├── SmsController.cs      # POST /api/sms
-│   └── HealthController.cs   # GET /api/health
+│   └── SmsController.cs      # POST /api/sms
+├── HealthChecks/             # GET /health (database + delivery backlog)
 ├── Services/
 │   ├── SmsStorageService.cs  # Database operations
 │   ├── TelegramService.cs    # Telegram Bot API
 │   └── RetryService.cs       # Background retry worker
 ├── Middleware/
 │   └── ApiKeyMiddleware.cs   # X-API-Key validation
+├── Options/                  # Validated configuration (ApiKey(s), Telegram)
 ├── Models/
 │   └── SmsMessage.cs         # Data model
 └── Data/
@@ -282,7 +300,7 @@ docker run -d -p 5000:8080 \
 
 | Problem | Solution |
 |---------|----------|
-| 401/403 errors | Check X-API-Key matches between device and server |
+| 401 errors | Check X-API-Key matches between device and server |
 | Telegram fails | Verify bot token and chat ID; check firewall (port 443) |
 | Database errors | Run `dotnet ef database update` |
 | Connection refused | Check server is running and port is open |

@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using SIMOrchestrator.Logging;
 using SIMOrchestrator.Models;
 using SIMOrchestrator.Services;
 
@@ -25,7 +26,7 @@ public class SmsController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> ReceiveSms([FromBody] SmsRequest request)
     {
-        _logger.LogInformation("Received SMS from {Sender}", request.Sender);
+        _logger.LogInformation("Received SMS from {Sender}", SenderMasker.Mask(request.Sender));
 
         var sms = await _storage.SaveSmsAsync(request);
 

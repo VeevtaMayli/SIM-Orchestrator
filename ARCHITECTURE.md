@@ -45,7 +45,7 @@ SmsMessage → HttpSender → WiFiClientSecure → HTTPS POST
                           ▼
                     ApiKeyMiddleware (validate X-API-Key)
                           │
-                          ▼ 401/403 or continue
+                          ▼ 401 or continue
                     SmsController.ReceiveSms()
 ```
 
@@ -85,9 +85,10 @@ RetryService (every 5 min)
 | Layer | Mechanism |
 |-------|-----------|
 | Device → Server | HTTPS (TLS) + CA certificate validation |
-| Authentication | X-API-Key header → ApiKeyMiddleware |
+| Authentication | X-API-Key header → ApiKeyMiddleware (SHA-256 + constant-time compare, several active keys for rotation) |
 | Server → Telegram | HTTPS (TLS 1.2+) |
-| Secrets | Separate config files, git-ignored |
+| Secrets | Environment variables / user secrets, validated at startup; bot token never logged |
+| Abuse | 60 req/min per client IP (real IP taken from the reverse proxy), 64 KB request limit |
 
 ## Database Schema
 
@@ -127,6 +128,6 @@ SmsMessages
 
 | Setting | File | Description |
 |---------|------|-------------|
-| API Key | appsettings.json | Must match device |
-| Telegram | appsettings.json | Bot token + chat ID |
-| Database | appsettings.json | Connection string |
+| API Key(s) | `ApiKey` / `ApiKeys__N` env | Must match device, min 32 chars |
+| Telegram | `Telegram__BotToken`, `Telegram__ChatId` env | Bot token + chat ID |
+| Database | `ConnectionStrings__DefaultConnection` env | Connection string |

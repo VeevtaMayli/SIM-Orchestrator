@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using SIMOrchestrator.Data;
+using SIMOrchestrator.Logging;
 using SIMOrchestrator.Models;
 
 namespace SIMOrchestrator.Services;
@@ -29,7 +30,7 @@ public class SmsStorageService : ISmsStorageService
         _context.SmsMessages.Add(sms);
         await _context.SaveChangesAsync();
 
-        _logger.LogInformation("SMS saved. ID: {Id}, From: {Sender}", sms.Id, sms.Sender);
+        _logger.LogInformation("SMS saved. ID: {Id}, From: {Sender}", sms.Id, SenderMasker.Mask(sms.Sender));
         return sms;
     }
 
@@ -39,6 +40,11 @@ public class SmsStorageService : ISmsStorageService
             .Where(s => !s.SentToTelegram)
             .OrderBy(s => s.ReceivedAt)
             .ToListAsync();
+    }
+
+    public Task<int> CountUnsentAsync(CancellationToken cancellationToken = default)
+    {
+        return _context.SmsMessages.CountAsync(s => !s.SentToTelegram, cancellationToken);
     }
 
     public async Task MarkAsSentAsync(int smsId)

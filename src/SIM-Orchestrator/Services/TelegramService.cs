@@ -1,27 +1,31 @@
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
 using SIMOrchestrator.Models;
+using SIMOrchestrator.Options;
 
 namespace SIMOrchestrator.Services;
 
 public class TelegramService : ITelegramService
 {
+    private const int MaxLoggedResponseLength = 500;
+
     private readonly HttpClient _httpClient;
     private readonly ILogger<TelegramService> _logger;
-    private readonly string _botToken;
     private readonly string _chatId;
 
+    /// <param name="httpClient">
+    /// Must have a BaseAddress that already contains the bot token
+    /// (see <see cref="TelegramServiceCollectionExtensions.AddTelegramClient"/>).
+    /// </param>
     public TelegramService(
         HttpClient httpClient,
-        IConfiguration configuration,
+        IOptions<TelegramOptions> options,
         ILogger<TelegramService> logger)
     {
         _httpClient = httpClient;
         _logger = logger;
-        _botToken = configuration["Telegram:BotToken"]
-            ?? throw new InvalidOperationException("Telegram:BotToken not configured");
-        _chatId = configuration["Telegram:ChatId"]
-            ?? throw new InvalidOperationException("Telegram:ChatId not configured");
+        _chatId = options.Value.ChatId;
     }
 
     public async Task<bool> SendSmsToTelegramAsync(SmsMessage sms)
@@ -29,7 +33,6 @@ public class TelegramService : ITelegramService
         try
         {
             var message = FormatMessage(sms);
-            var url = $"https://api.telegram.org/bot{_botToken}/sendMessage";
 
             var payload = new
             {
@@ -43,7 +46,7 @@ public class TelegramService : ITelegramService
 
             _logger.LogInformation("Sending SMS to Telegram. ID: {Id}", sms.Id);
 
-            var response = await _httpClient.PostAsync(url, content);
+            var response = await _httpClient.PostAsync("sendMessage", content);
 
             if (response.IsSuccessStatusCode)
             {
@@ -53,7 +56,7 @@ public class TelegramService : ITelegramService
 
             var errorContent = await response.Content.ReadAsStringAsync();
             _logger.LogWarning("Telegram API error. Status: {Status}, Response: {Response}",
-                response.StatusCode, errorContent);
+                response.StatusCode, Truncate(errorContent, MaxLoggedResponseLength));
             return false;
         }
         catch (Exception ex)
@@ -104,6 +107,9 @@ public class TelegramService : ITelegramService
             "<code>$1</code>"
         );
     }
+
+    private static string Truncate(string value, int maxLength)
+        => value.Length <= maxLength ? value : value[..maxLength] + "…";
 
     private static string EscapeHtml(string text)
     {
