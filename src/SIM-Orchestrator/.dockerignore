@@ -1,0 +1,21 @@
+# Build output and local artifacts must not leak into the image
+bin/
+obj/
+TestResults/
+
+# Local databases
+*.db
+*.db-shm
+*.db-wal
+
+# IDE and OS files
+.vs/
+.vscode/
+.idea/
+*.user
+.DS_Store
+Thumbs.db
+
+# Docker
+Dockerfile
+.dockerignore

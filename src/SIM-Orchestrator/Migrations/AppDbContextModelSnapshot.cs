@@ -23,6 +23,24 @@ namespace SIMOrchestrator.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<int>("Attempts")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("DedupKey")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LeaseExpiresAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("NextAttemptAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime>("ReceivedAt")
                         .HasColumnType("TEXT");
 
@@ -37,6 +55,9 @@ namespace SIMOrchestrator.Migrations
                     b.Property<DateTime?>("SentToTelegramAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("Status")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Text")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -47,9 +68,14 @@ namespace SIMOrchestrator.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("DedupKey")
+                        .IsUnique();
+
                     b.HasIndex("ReceivedAt");
 
                     b.HasIndex("SentToTelegram");
+
+                    b.HasIndex("Status", "NextAttemptAt");
 
                     b.ToTable("SmsMessages");
                 });

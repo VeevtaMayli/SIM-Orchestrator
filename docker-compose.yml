@@ -10,11 +10,20 @@ services:
       - ASPNETCORE_ENVIRONMENT=Production
       - ConnectionStrings__DefaultConnection=Data Source=/data/sms_gateway.db
       - ApiKey=${API_KEY}
+      - ApiKeys__0=${API_KEY_NEXT:-}
       - Telegram__BotToken=${TELEGRAM_BOT_TOKEN}
       - Telegram__ChatId=${TELEGRAM_CHAT_ID}
+      - Display__TimeZone=${DISPLAY_TIMEZONE:-UTC}
     volumes:
       - sms-data:/data
     restart: unless-stopped
+    # Give the dispatcher time to finish the message in flight on shutdown.
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s

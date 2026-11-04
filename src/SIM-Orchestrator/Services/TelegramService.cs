@@ -1,115 +1,125 @@
+using System.Net;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
 using SIMOrchestrator.Models;
+using SIMOrchestrator.Options;
 
 namespace SIMOrchestrator.Services;
 
 public class TelegramService : ITelegramService
 {
+    private const int MaxLoggedResponseLength = 500;
+    private const int MaxErrorLength = 200;
+
     private readonly HttpClient _httpClient;
+    private readonly MessageFormatter _formatter;
     private readonly ILogger<TelegramService> _logger;
-    private readonly string _botToken;
     private readonly string _chatId;
 
+    /// <param name="httpClient">
+    /// Must have a BaseAddress that already contains the bot token
+    /// (see <see cref="TelegramServiceCollectionExtensions.AddTelegramClient"/>).
+    /// </param>
     public TelegramService(
         HttpClient httpClient,
-        IConfiguration configuration,
+        IOptions<TelegramOptions> options,
+        MessageFormatter formatter,
         ILogger<TelegramService> logger)
     {
         _httpClient = httpClient;
+        _formatter = formatter;
         _logger = logger;
-        _botToken = configuration["Telegram:BotToken"]
-            ?? throw new InvalidOperationException("Telegram:BotToken not configured");
-        _chatId = configuration["Telegram:ChatId"]
-            ?? throw new InvalidOperationException("Telegram:ChatId not configured");
+        _chatId = options.Value.ChatId;
     }
 
-    public async Task<bool> SendSmsToTelegramAsync(SmsMessage sms)
+    public async Task<TelegramSendResult> SendSmsToTelegramAsync(SmsMessage sms, CancellationToken cancellationToken = default)
+    {
+        var parts = _formatter.Format(sms);
+        _logger.LogInformation("Sending SMS to Telegram. ID: {Id}, Parts: {Parts}", sms.Id, parts.Count);
+
+        foreach (var part in parts)
+        {
+            var result = await SendTextAsync(part, cancellationToken);
+            if (!result.Success)
+            {
+                _logger.LogWarning("Failed to send SMS to Telegram. ID: {Id}, Error: {Error}", sms.Id, result.Error);
+                return result;
+            }
+        }
+
+        _logger.LogInformation("SMS sent to Telegram. ID: {Id}", sms.Id);
+        return TelegramSendResult.Ok();
+    }
+
+    private async Task<TelegramSendResult> SendTextAsync(string text, CancellationToken cancellationToken)
     {
         try
         {
-            var message = FormatMessage(sms);
-            var url = $"https://api.telegram.org/bot{_botToken}/sendMessage";
-
             var payload = new
             {
                 chat_id = _chatId,
-                text = message,
+                text,
                 parse_mode = "HTML"
             };
 
             var json = JsonSerializer.Serialize(payload);
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
+            using var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-            _logger.LogInformation("Sending SMS to Telegram. ID: {Id}", sms.Id);
-
-            var response = await _httpClient.PostAsync(url, content);
-
+            using var response = await _httpClient.PostAsync("sendMessage", content, cancellationToken);
             if (response.IsSuccessStatusCode)
-            {
-                _logger.LogInformation("SMS sent to Telegram. ID: {Id}", sms.Id);
-                return true;
-            }
+                return TelegramSendResult.Ok();
 
-            var errorContent = await response.Content.ReadAsStringAsync();
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
             _logger.LogWarning("Telegram API error. Status: {Status}, Response: {Response}",
-                response.StatusCode, errorContent);
-            return false;
+                response.StatusCode, Truncate(body, MaxLoggedResponseLength));
+
+            var retryAfter = response.StatusCode == HttpStatusCode.TooManyRequests
+                ? ParseRetryAfter(body, response.Headers.RetryAfter)
+                : null;
+
+            return TelegramSendResult.Failure(
+                $"Telegram API {(int)response.StatusCode}: {Truncate(body, MaxErrorLength)}",
+                retryAfter);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to send SMS to Telegram. ID: {Id}", sms.Id);
-            return false;
+            // Includes the HttpClient timeout (TaskCanceledException without our token being cancelled).
+            _logger.LogError(ex, "Failed to send message to Telegram");
+            return TelegramSendResult.Failure($"{ex.GetType().Name}: {Truncate(ex.Message, MaxErrorLength)}");
         }
     }
 
-    private static string FormatMessage(SmsMessage sms)
+    /// <summary>Reads <c>parameters.retry_after</c> from a 429 body, falling back to the Retry-After header.</summary>
+    internal static TimeSpan? ParseRetryAfter(string body, RetryConditionHeaderValue? header)
     {
-        string sentTimeFormatted;
-        if (!string.IsNullOrEmpty(sms.Timestamp) &&
-            DateTimeOffset.TryParse(sms.Timestamp, out var sentTime))
+        try
         {
-            sentTimeFormatted = sentTime.ToString("yyyy-MM-dd HH:mm:ss zzz");
+            using var document = JsonDocument.Parse(body);
+            if (document.RootElement.TryGetProperty("parameters", out var parameters)
+                && parameters.TryGetProperty("retry_after", out var retryAfter)
+                && retryAfter.TryGetInt32(out var seconds)
+                && seconds > 0)
+            {
+                return TimeSpan.FromSeconds(seconds);
+            }
         }
-        else
+        catch (JsonException)
         {
-            // Fallback: show raw timestamp or ReceivedAt
-            sentTimeFormatted = string.IsNullOrEmpty(sms.Timestamp)
-                ? new DateTimeOffset(sms.ReceivedAt).ToString("yyyy-MM-dd HH:mm:ss zzz")
-                : sms.Timestamp;
+            // Not JSON: fall through to the header.
         }
 
-        // Show ReceivedAt with server timezone (assume UTC if Kind is Unspecified)
-        var receivedTime = sms.ReceivedAt.Kind == DateTimeKind.Unspecified
-            ? new DateTimeOffset(sms.ReceivedAt, TimeSpan.Zero)
-            : new DateTimeOffset(sms.ReceivedAt);
-        var receivedTimeFormatted = receivedTime.ToString("yyyy-MM-dd HH:mm:ss zzz");
+        if (header?.Delta is { } delta && delta > TimeSpan.Zero)
+            return delta;
 
-        // Format text: highlight numbers with monospace for easy copying (OTP codes, etc.)
-        var formattedText = HighlightNumbers(EscapeHtml(sms.Text));
-
-        return $"{formattedText}\n\n" +
-               $"👤 {EscapeHtml(sms.Sender)}\n" +
-               $"🕒 {sentTimeFormatted}\n" +
-               $"📥 {receivedTimeFormatted}";
+        return null;
     }
 
-    private static string HighlightNumbers(string text)
-    {
-        // Highlight sequences of 4+ digits with monospace font
-        // Regex: (?<!\d)\d{4,}(?!\d) matches digit sequences (4 or more) not surrounded by other digits
-        return System.Text.RegularExpressions.Regex.Replace(
-            text,
-            @"(?<!\d)(\d{4,})(?!\d)",
-            "<code>$1</code>"
-        );
-    }
-
-    private static string EscapeHtml(string text)
-    {
-        return text
-            .Replace("&", "&amp;")
-            .Replace("<", "&lt;")
-            .Replace(">", "&gt;");
-    }
+    private static string Truncate(string value, int maxLength)
+        => value.Length <= maxLength ? value : value[..maxLength] + "…";
 }

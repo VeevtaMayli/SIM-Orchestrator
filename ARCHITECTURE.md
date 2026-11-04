@@ -45,7 +45,7 @@ SmsMessage → HttpSender → WiFiClientSecure → HTTPS POST
                           ▼
                     ApiKeyMiddleware (validate X-API-Key)
                           │
-                          ▼ 401/403 or continue
+                          ▼ 401 or continue
                     SmsController.ReceiveSms()
 ```
 
@@ -76,8 +76,11 @@ RetryService (every 5 min)
 | Scenario | Device Behavior | Server Behavior |
 |----------|-----------------|-----------------|
 | Server unreachable | Keep SMS on SIM, retry in 10s | — |
-| Server 500 | Keep SMS on SIM | SMS saved, RetryService retries Telegram |
-| Telegram down | — | SMS saved, RetryService retries in 5 min |
+| Server 500 | Keep SMS on SIM, resend | Resend is deduplicated by key, no second copy |
+| Response lost after 200 | Resend | Server answers `duplicate` with the original id |
+| Telegram down | — | SMS saved, dispatcher retries with backoff (1/5/15/60 min) |
+| Telegram 429 | — | Retried after `retry_after`, batch paused |
+| Telegram fails 20 times | — | Message `Failed`, `/health` degraded |
 | Success | Delete SMS from SIM | Mark as sent |
 
 ## Security
@@ -85,9 +88,10 @@ RetryService (every 5 min)
 | Layer | Mechanism |
 |-------|-----------|
 | Device → Server | HTTPS (TLS) + CA certificate validation |
-| Authentication | X-API-Key header → ApiKeyMiddleware |
+| Authentication | X-API-Key header → ApiKeyMiddleware (SHA-256 + constant-time compare, several active keys for rotation) |
 | Server → Telegram | HTTPS (TLS 1.2+) |
-| Secrets | Separate config files, git-ignored |
+| Secrets | Environment variables / user secrets, validated at startup; bot token never logged |
+| Abuse | 60 req/min per client IP (real IP taken from the reverse proxy), 64 KB request limit |
 
 ## Database Schema
 
@@ -96,9 +100,15 @@ SmsMessages
 ├── Id (PK)
 ├── Sender (varchar 50)
 ├── Text (text)
-├── Timestamp (varchar 50)
-├── ReceivedAt (datetime)
-├── SentToTelegram (bool) -- indexed
+├── Timestamp (varchar 50)          -- as sent by the device
+├── ReceivedAt (datetime, UTC)      -- indexed
+├── DedupKey (varchar 80)           -- unique
+├── Status (int)                    -- Pending/InProgress/Sent/Failed, indexed with NextAttemptAt
+├── Attempts (int)
+├── NextAttemptAt (datetime, nullable)
+├── LeaseExpiresAt (datetime, nullable)
+├── LastError (varchar 500, nullable)
+├── SentToTelegram (bool)           -- legacy flag, equals Status = Sent
 └── SentToTelegramAt (datetime, nullable)
 ```
 
@@ -109,7 +119,7 @@ SmsMessages
 | Platform | ESP32 | .NET 8.0 |
 | HTTP | WiFiClientSecure | ASP.NET Core |
 | SMS | TinyGSM + A7670 | — |
-| Database | — | EF Core + SQLite/PostgreSQL |
+| Database | — | EF Core + SQLite |
 | JSON | ArduinoJson | System.Text.Json |
 
 ## Configuration
@@ -127,6 +137,6 @@ SmsMessages
 
 | Setting | File | Description |
 |---------|------|-------------|
-| API Key | appsettings.json | Must match device |
-| Telegram | appsettings.json | Bot token + chat ID |
-| Database | appsettings.json | Connection string |
+| API Key(s) | `ApiKey` / `ApiKeys__N` env | Must match device, min 32 chars |
+| Telegram | `Telegram__BotToken`, `Telegram__ChatId` env | Bot token + chat ID |
+| Database | `ConnectionStrings__DefaultConnection` env | Connection string |
