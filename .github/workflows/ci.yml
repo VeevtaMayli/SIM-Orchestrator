@@ -102,7 +102,8 @@ jobs:
             type=ref,event=pr
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix={{branch}}-
+            # {{branch}} is empty on pull_request events and would yield an invalid tag
+            type=sha,prefix={{branch}}-,enable=${{ github.event_name != 'pull_request' }}
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push Docker image
