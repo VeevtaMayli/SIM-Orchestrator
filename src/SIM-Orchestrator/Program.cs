@@ -11,6 +11,9 @@ using SIMOrchestrator.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// No-op outside systemd; under systemd makes Type=notify work and routes logs to the journal.
+builder.Host.UseSystemd();
+
 // An SMS payload is a few kilobytes at most; anything larger is not a device.
 const long maxRequestBodyBytes = 64 * 1024;
 builder.WebHost.ConfigureKestrel(kestrel => kestrel.Limits.MaxRequestBodySize = maxRequestBodyBytes);

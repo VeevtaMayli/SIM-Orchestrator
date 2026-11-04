@@ -17,6 +17,13 @@ services:
     volumes:
       - sms-data:/data
     restart: unless-stopped
+    # Give the dispatcher time to finish the message in flight on shutdown.
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s

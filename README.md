@@ -2,6 +2,8 @@
 
 Backend API server for the SMS Gateway system. Receives SMS from SIM-Relay devices, stores in database, forwards to Telegram.
 
+> **Runtime note:** the project targets .NET 8 (LTS), whose Microsoft support ends on 10 November 2026. Moving to .NET 10 LTS is the next planned step.
+
 ## Architecture
 
 ```
@@ -9,7 +11,7 @@ SIM-Relay (ESP32)
       |  HTTPS POST + X-API-Key
       v
 SIM-Orchestrator (this server)
-      |--- Database (SQLite/PostgreSQL)
+      |--- Database (SQLite)
       +--- Telegram Bot API
 ```
 
@@ -65,7 +67,7 @@ docker-compose down
 ### Prerequisites
 
 - .NET 8.0 SDK
-- Database: SQLite (dev) / PostgreSQL (prod)
+- Database: SQLite (the file is created and migrated automatically on first start)
 
 ### Configuration
 
@@ -87,9 +89,10 @@ The server validates this configuration on startup and refuses to start if anyth
 
 ```bash
 cd src/SIM-Orchestrator
-dotnet ef database update
 dotnet run
 ```
+
+Database migrations are applied automatically on startup; `dotnet ef database update` is not needed.
 
 Server starts on `http://localhost:5000`.
 
@@ -206,10 +209,10 @@ src/SIM-Orchestrator/
 **1. Install Caddy:**
 
 ```bash
-# Download and run setup script
-wget https://raw.githubusercontent.com/YOUR_USERNAME/SIM-Orchestrator/main/setup-caddy.sh
+# Download and run setup script (the domain must already resolve to this server)
+wget https://raw.githubusercontent.com/VeevtaMayli/SIM-Orchestrator/main/setup-caddy.sh
 chmod +x setup-caddy.sh
-./setup-caddy.sh
+./setup-caddy.sh sms.example.com
 ```
 
 Or manually:
@@ -229,14 +232,14 @@ sudo nano /etc/caddy/Caddyfile
 Paste:
 
 ```
-%YOUR_DOMAIN% {
+sms.example.com {
     reverse_proxy localhost:5000
 
     header {
         Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
         X-Frame-Options "DENY"
         X-Content-Type-Options "nosniff"
-        X-XSS-Protection "1; mode=block"
+        Referrer-Policy "no-referrer"
     }
 
     log {
@@ -265,7 +268,16 @@ docker compose up -d
 **3. Verify HTTPS:**
 
 ```bash
-curl -I https://%YOUR_DOMAIN%/health
+curl -I https://sms.example.com/health
+```
+
+**4. Automatic deployment from CI:** on every push to `main` the workflow builds the image,
+pushes it to GHCR and runs `docker compose pull && docker compose up -d` on the VPS over SSH
+(secrets `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY`). For `docker compose pull` to work,
+the `.env` on the VPS must point at the registry image:
+
+```bash
+DOCKER_IMAGE=ghcr.io/veevtamayli/sim-orchestrator:latest
 ```
 
 Caddy automatically provisions Let's Encrypt SSL certificates.
@@ -290,12 +302,19 @@ ExecStart=/usr/bin/dotnet SIM-Orchestrator.dll
 Restart=always
 User=www-data
 Environment=ASPNETCORE_ENVIRONMENT=Production
+Environment=ASPNETCORE_URLS=http://127.0.0.1:5000
+EnvironmentFile=/etc/sim-orchestrator.env
 
 [Install]
 WantedBy=multi-user.target
 ```
 
+`/etc/sim-orchestrator.env` (readable by root only) holds the same settings as the Docker `.env`
+in configuration form, for example `ApiKey=...`, `Telegram__BotToken=...`, `Telegram__ChatId=...`,
+`ConnectionStrings__DefaultConnection=Data Source=/var/lib/sim-orchestrator/sms_gateway.db`.
+
 ```bash
+sudo chmod 600 /etc/sim-orchestrator.env
 sudo systemctl enable --now sim-orchestrator
 ```
 
@@ -342,8 +361,8 @@ docker run -d -p 5000:8080 \
 | Problem | Solution |
 |---------|----------|
 | 401 errors | Check X-API-Key matches between device and server |
-| Telegram fails | Verify bot token and chat ID; check firewall (port 443) |
-| Database errors | Run `dotnet ef database update` |
+| Telegram fails | Verify bot token and chat ID; check firewall (port 443); `/health` shows `unsentMessages`/`failedMessages` |
+| Database errors | Check the volume/path is writable; migrations run automatically on startup |
 | Connection refused | Check server is running and port is open |
 
 ## Related

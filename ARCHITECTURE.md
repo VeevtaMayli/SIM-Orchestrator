@@ -119,7 +119,7 @@ SmsMessages
 | Platform | ESP32 | .NET 8.0 |
 | HTTP | WiFiClientSecure | ASP.NET Core |
 | SMS | TinyGSM + A7670 | — |
-| Database | — | EF Core + SQLite/PostgreSQL |
+| Database | — | EF Core + SQLite |
 | JSON | ArduinoJson | System.Text.Json |
 
 ## Configuration
