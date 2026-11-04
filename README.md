@@ -147,6 +147,20 @@ Delivery__DelayBetweenMessages=00:00:01
 Delivery__BackoffMinutes__0=1          # ... __1=5, __2=15, __3=60
 ```
 
+### Message format and time zone
+
+Telegram messages show the SMS text (digit runs of 4+ in monospace for easy copying),
+the sender, the time the SMS was sent (`🕒`) and the time the server received it (`📥`).
+Both times are rendered in `Display__TimeZone` (IANA id, default `UTC`), for example:
+
+```bash
+DISPLAY_TIMEZONE=Europe/Moscow
+```
+
+The device `timestamp` is accepted as ISO 8601 (`2025-12-28T14:30:00+03:00`), as the
+modem's `yy/MM/dd,HH:mm:ss±zz` (zz in quarter hours) or as plain `yyyy-MM-dd HH:mm:ss`.
+A timestamp without a zone is shown exactly as sent; an unparsable one is shown verbatim.
+
 ### API key rotation
 
 Several keys can be active at once, so a key can be rotated without downtime:

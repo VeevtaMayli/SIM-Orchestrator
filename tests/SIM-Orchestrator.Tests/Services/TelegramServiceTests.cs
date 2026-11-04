@@ -189,7 +189,7 @@ public class TelegramServiceTests
         var parts = handler.RequestBodies
             .Select(b => System.Text.Json.JsonDocument.Parse(b).RootElement.GetProperty("text").GetString()!)
             .ToList();
-        Assert.All(parts, p => Assert.True(p.Length <= TelegramService.MaxMessageLength));
+        Assert.All(parts, p => Assert.True(p.Length <= MessageFormatter.MaxMessageLength));
         Assert.All(parts, p => Assert.DoesNotContain("<cod\n", p));
         for (var i = 0; i < parts.Count; i++)
             Assert.EndsWith($"📄 {i + 1}/{parts.Count}", parts[i]);

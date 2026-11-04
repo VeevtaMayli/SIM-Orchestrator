@@ -10,14 +10,11 @@ namespace SIMOrchestrator.Services;
 
 public class TelegramService : ITelegramService
 {
-    /// <summary>Hard limit of the Telegram Bot API for one text message.</summary>
-    public const int MaxMessageLength = 4096;
-
     private const int MaxLoggedResponseLength = 500;
     private const int MaxErrorLength = 200;
-    private const int InitialChunkLength = 3500;
 
     private readonly HttpClient _httpClient;
+    private readonly MessageFormatter _formatter;
     private readonly ILogger<TelegramService> _logger;
     private readonly string _chatId;
 
@@ -28,16 +25,18 @@ public class TelegramService : ITelegramService
     public TelegramService(
         HttpClient httpClient,
         IOptions<TelegramOptions> options,
+        MessageFormatter formatter,
         ILogger<TelegramService> logger)
     {
         _httpClient = httpClient;
+        _formatter = formatter;
         _logger = logger;
         _chatId = options.Value.ChatId;
     }
 
     public async Task<TelegramSendResult> SendSmsToTelegramAsync(SmsMessage sms, CancellationToken cancellationToken = default)
     {
-        var parts = FormatMessages(sms);
+        var parts = _formatter.Format(sms);
         _logger.LogInformation("Sending SMS to Telegram. ID: {Id}, Parts: {Parts}", sms.Id, parts.Count);
 
         foreach (var part in parts)
@@ -121,100 +120,6 @@ public class TelegramService : ITelegramService
         return null;
     }
 
-    /// <summary>
-    /// Formats the SMS as one or more Telegram messages, each within the API limit.
-    /// </summary>
-    internal static IReadOnlyList<string> FormatMessages(SmsMessage sms)
-    {
-        var footer = FormatFooter(sms);
-
-        var single = HighlightNumbers(EscapeHtml(sms.Text)) + footer;
-        if (single.Length <= MaxMessageLength)
-            return [single];
-
-        // Split the raw text, then escape/highlight each piece so markup is never cut.
-        // Shrink the raw chunk size until every formatted part fits.
-        for (var chunkLength = InitialChunkLength; chunkLength >= 1; chunkLength /= 2)
-        {
-            var chunks = SplitRaw(sms.Text, chunkLength);
-            var parts = new List<string>(chunks.Count);
-            for (var i = 0; i < chunks.Count; i++)
-            {
-                parts.Add($"{HighlightNumbers(EscapeHtml(chunks[i]))}{footer}\n📄 {i + 1}/{chunks.Count}");
-            }
-
-            if (parts.All(p => p.Length <= MaxMessageLength))
-                return parts;
-        }
-
-        throw new InvalidOperationException("Unable to split the message into Telegram-sized parts");
-    }
-
-    private static List<string> SplitRaw(string text, int chunkLength)
-    {
-        var chunks = new List<string>();
-        var index = 0;
-        while (index < text.Length)
-        {
-            var length = Math.Min(chunkLength, text.Length - index);
-            // Never cut a surrogate pair in half.
-            if (length > 1 && char.IsHighSurrogate(text[index + length - 1]))
-                length--;
-            chunks.Add(text.Substring(index, length));
-            index += length;
-        }
-        return chunks;
-    }
-
-    private static string FormatFooter(SmsMessage sms)
-    {
-        string sentTimeFormatted;
-        if (!string.IsNullOrEmpty(sms.Timestamp) &&
-            DateTimeOffset.TryParse(sms.Timestamp, out var sentTime))
-        {
-            sentTimeFormatted = sentTime.ToString("yyyy-MM-dd HH:mm:ss zzz");
-        }
-        else
-        {
-            // Fallback: show raw timestamp or ReceivedAt
-            sentTimeFormatted = string.IsNullOrEmpty(sms.Timestamp)
-                ? ToUtc(sms.ReceivedAt).ToString("yyyy-MM-dd HH:mm:ss zzz")
-                : sms.Timestamp;
-        }
-
-        var receivedTimeFormatted = ToUtc(sms.ReceivedAt).ToString("yyyy-MM-dd HH:mm:ss zzz");
-
-        return "\n\n" +
-               $"👤 {EscapeHtml(sms.Sender)}\n" +
-               $"🕒 {sentTimeFormatted}\n" +
-               $"📥 {receivedTimeFormatted}";
-    }
-
-    /// <summary>ReceivedAt is always UTC; values read from SQLite may carry Kind=Unspecified.</summary>
-    private static DateTimeOffset ToUtc(DateTime value)
-        => value.Kind == DateTimeKind.Unspecified
-            ? new DateTimeOffset(value, TimeSpan.Zero)
-            : new DateTimeOffset(value.ToUniversalTime(), TimeSpan.Zero);
-
-    private static string HighlightNumbers(string text)
-    {
-        // Highlight sequences of 4+ digits with monospace font
-        // Regex: (?<!\d)\d{4,}(?!\d) matches digit sequences (4 or more) not surrounded by other digits
-        return System.Text.RegularExpressions.Regex.Replace(
-            text,
-            @"(?<!\d)(\d{4,})(?!\d)",
-            "<code>$1</code>"
-        );
-    }
-
     private static string Truncate(string value, int maxLength)
         => value.Length <= maxLength ? value : value[..maxLength] + "…";
-
-    private static string EscapeHtml(string text)
-    {
-        return text
-            .Replace("&", "&amp;")
-            .Replace("<", "&lt;")
-            .Replace(">", "&gt;");
-    }
 }

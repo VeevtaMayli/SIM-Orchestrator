@@ -25,6 +25,12 @@ public static class TelegramServiceCollectionExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
+        services.AddOptions<DisplayOptions>()
+            .BindConfiguration(DisplayOptions.SectionName)
+            .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<DisplayOptions>, DisplayOptionsValidator>();
+        services.AddSingleton<MessageFormatter>();
+
         return services
             .AddHttpClient<ITelegramService, TelegramService>((provider, client) =>
             {
